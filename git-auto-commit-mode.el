@@ -26,8 +26,9 @@
 ;; git-auto-commit-mode is an Emacs minor mode that tries to commit
 ;; changes to a file after every save.
 
-;; When `gac-automatically-push-p' is non-nil, it also tries to push
-;; to the current upstream.
+;; When `gac-automatically-push-p' is non-nil, it also tries to push to the
+;; current upstream. `gac-automatically-fetch-p' affects fetching respectively.
+;; `gac-automatically-pull-p' affects pulling when a buffer is first opened.
 
 ;;; Code:
 
@@ -35,6 +36,22 @@
   "Customization options for `git-auto-commit-mode'."
   :group 'external)
 
+(defcustom gac-automatically-pull-p nil
+  "Automatically pull --ff-only when a file is opened."
+  :tag "Automatically pull with --ff-only"
+  :group 'git-auto-commit-mode
+  :type 'boolean
+  :risky t)
+(make-variable-buffer-local 'gac-automatically-pull-p)
+(defcustom gac-automatically-fetch-p nil
+  "Automatically fetch after each commit.
+
+If non-nil a git fetch will be executed after each commit."
+  :tag "Automatically fetch"
+  :group 'git-auto-commit-mode
+  :type 'boolean
+  :risky t)
+(make-variable-buffer-local 'gac-automatically-fetch-p)
 (defcustom gac-automatically-push-p nil
   "Automatically push after each commit.
 
@@ -121,6 +138,21 @@ Default to FILENAME."
              gac-shell-and
              "git commit -m " (shell-quote-argument commit-msg)))))
 
+(defun gac-pull ()
+  "Fetch commits from the current upstream and do fast forward if possible."
+  (let ((proc (start-process "git" "*git-auto-fetch*" "git" "pull" "--ff-only")))
+    (set-process-sentinel proc 'gac-process-sentinel)
+    (set-process-filter proc 'gac-process-filter)))
+
+(defun gac-fetch ()
+  "Fetch commits from the current upstream.
+
+This doesn't check or ask for a remote, so the correct remote
+should already have been set up."
+  (let ((proc (start-process "git" "*git-auto-fetch*" "git" "fetch")))
+    (set-process-sentinel proc 'gac-process-sentinel)
+    (set-process-filter proc 'gac-process-filter)))
+
 (defun gac-push ()
   "Push commits to the current upstream.
 
@@ -130,11 +162,19 @@ should already have been set up."
     (set-process-sentinel proc 'gac-process-sentinel)
     (set-process-filter proc 'gac-process-filter)))
 
+(defun gac-file-open-func ()
+  "Fetch changes and ff if possible."
+  (when gac-automatically-pull-p
+    (gac-pull))
+  )
+
 (defun gac-after-save-func ()
   "Commit the current file.
 
 When `gac-automatically-push-p' is non-nil also push."
   (gac-commit)
+  (when gac-automatically-fetch-p
+    (gac-fetch))
   (when gac-automatically-push-p
     (gac-push)))
 
@@ -144,7 +184,9 @@ When `gac-automatically-push-p' is non-nil also push."
 mode turned on and optionally push them too."
   :lighter " ga"
   (if git-auto-commit-mode
-      (add-hook 'after-save-hook 'gac-after-save-func t t)
+      (progn
+        (add-hook 'find-file-hook 'gac-file-open-func t t)
+        (add-hook 'after-save-hook 'gac-after-save-func t t))
     (remove-hook 'after-save-hook 'gac-after-save-func t)))
 
 (provide 'git-auto-commit-mode)
